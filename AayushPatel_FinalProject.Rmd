@@ -1,0 +1,988 @@
+---
+title: "American Community Survey 2013-17 Project Report"
+author: "Aayush Patel - 0672897"
+
+output: 
+  html_document:
+    theme: yeti
+    toc: yes
+    code_folding: show
+    toc_float: true 
+
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(viridis)
+library(data.table)
+library(formattable)
+library(forcats)
+library(caret)
+library(e1071)
+library(caTools)
+library(dplyr)
+library(nnet)
+library(NeuralNetTools)
+library(nnet)
+library(devtools)
+
+```
+
+## **Data Summary**
+
+<p style="color:#025C97">In this project, I have used Population data from 2013-17 American Community Survey(ACS) which is a sample of the actual responses collected by the American Community Survey between 2013-2017, and split into population and household characteristics. This project, mainly focusses on features including but not limited to "Income", "Class Of Worker", "Different types of Difficulties faced by people in U.S" , "Level of Education", "Insurance_from_private_companies". In addition to different graphical and tabular summaries/analysis, this project also uses Supervised Machine Learning algorithms, Deep Learning - Artificial Neural Networks and Statistical Tests in order to predict or analyze following things:
+<ul>
+<li>Support Vector Machine - Classification Algorithm is used to predict Income group into five different categories i.e "Very Low", "Low","Average","Above average" and "High"</li>
+<li>Artificial Neural Network -ANN is used to find which features influences people to buy Insurance from a private company. This model can be useful to Insurance companies to find which group of people are likely to buy Insurance so that they can make their marketing and promotional strategies</li>
+<li>Statistical Test - Ansari test is used to test whether Men and Women in Computer Engineering field earns the same or not.</li>
+<ul>
+</p>
+## **Methodology**
+
+<p style="color:#025C97">In order to perform analysis, this project has some key points to focus on how data has been accessed, manipulated, transformed and analyzed. 
+<ul>
+<li>Firstly, as this data is a micro data, I have used "PWGTP" variable which is a person weight in order to find total count of people per each observation. Eg. sum(PWGTP)</li>
+<li>As the Income had an adjustment factor for every year, a new column has been made called as "Income_with_ADJINC" = ("PINCP" * "ADJINC") / 1000000 where PINCP is Income. </li>
+<li>In order to predict Income, SVM was used because it's ability to perform well when there are large number of features and work with Multi-dimensional data.</li>
+<li>For faster processing speed, model training and some analysis were done on <b>M5.2xlarge- EC2 Instance from AWS </b> which costs around 25 USD for the whole project including storage and compute capacity</li>
+<li>For saving and loading data and ML models, this project uses readRDS() and saveRDS() functions. Hence majority of transformed and manipulated data were saved in form of .rds which save a lot of time while Knitting and performing analysis again.</li>
+<li>Other methdologies will be disscussed in the later sections of the project where actual analysis has been done!</li>
+</ul>
+</p>
+## **Major Findings and Discussions**
+
+<p style="color:#025C97">
+<ul>
+<li>"Hearing_Difficulty" had the highest count among other difficulties where "California" had highest number of people having hearing problems.</li>
+<li>Reported Income's for all different class of workers almost remained same from 2013-2017 where COW-7 "Self employed in own Incorporate business" earned the most.</li> 
+<li>According to survey data and analysis done in later sections, we can say that pursuing Master's and Professional Degree in any field of engineering is always helpful in terms of Income. However, only two fields "Architectural Engineering" and "Computer Engineering" had more average income when people pursue PHD.</li>
+<li>After performing ansari test for finding whether men and women earns the same in Computer and Architectural Engineering, I found that P- Value = 1.94e-13 < 0.05 (Significance level). And hence we should reject NULL hypothesis and conclude that there is significant amount of diffrence in Mens_Income and Women's Income who had done Computer Engineering. On the other hand, there was not significant difference in Mens and women's income for Architectural Engineering</li>
+<li>"Electrical Engineering" was the most popular field according to the survey data. In depth tabular summary is provided in later sections of this project.</li>
+<li>Using confusion matrix, we can see that SVM model had almost same accuracy(48%) for sample Training and Test dataset. But it might differ for whole training dataset. Although, this is not a great model, It can be improved using hyper-parameter optimization techniques like GridSearchCV, changinh kernel type,etc.</li>
+<li>Using ANN to predict Insurance purchase from private company, we can sy that "AGE" , "Means of Transportation" and "Income" affects the most according to model.In addition to that, Accuracy of trained ANN = 87.5% which I think is a really good prediction model and can be used in real time. However, due to lack of computation power and time, I could not perform hyper-parameter optimization techniques.</li>
+</ul>
+</p>
+
+
+## **Loading and Pre-processing Data **
+
+<p style="color:"#025C97">Loading Data</p>
+
+```{r eval=FALSE, message=FALSE, error=FALSE}
+
+columns <- c("ST","REGION","PWGTP","CIT","COW","ADJINC","PINCP","RAC1P","DDRS","DEAR","DEYE","DOUT","AGEP","SEX", "FOD1P","SCHL")
+read_file_a <-   fread("/home/ayush/Downloads/csv_pus/psam_pusa.csv",select=columns)
+read_file_b <- fread("/home/ayush/Downloads/csv_pus/psam_pusb.csv",select=columns)
+read_file_c <- fread("/home/ayush/Downloads/csv_pus/psam_pusc.csv",select=columns)
+read_file_d <- fread("/home/ayush/Downloads/csv_pus/psam_pusd.csv",select=columns)
+data_merged <- rbind(read_file_a,read_file_b,read_file_c,read_file_d)
+data_for_analysis_without_removing_na <- tbl_df(data_merged) 
+
+```
+
+<p style="color:#025C97">Creating a new column which represnts State names. </p>
+
+```{r eval=FALSE}
+  
+stateCode = "ST,State
+1,Alabama/AL
+2,Alaska/AK
+4,Arizona/AZ
+5,Arkansas/AR
+6,California/CA
+8,Colorado/CO
+9,Connecticut/CT
+10,Delaware/DE
+11,DistrictofColumbia/DC
+12,Florida/FL
+13,Georgia/GA
+15,Hawaii/HI
+16,Idaho/ID
+17,Illinois/IL
+18,Indiana/IN
+19,Iowa/IA
+20,Kansas/KS
+21,Kentucky/KY
+22,Louisiana/LA
+23,Maine/ME
+24,Maryland/MD
+25,Massachusetts/MA
+26,Michigan/MI
+27,Minnesota/MN
+28,Mississippi/MS
+29,Missouri/MO
+30,Montana/MT
+31,Nebraska/NE
+32,Nevada/NV
+33,NewHampshire/NH
+34,NewJersey/NJ
+35,NewMexico/NM
+36,NewYork/NY
+37,NorthCarolina/NC
+38,NorthDakota/ND
+39,Ohio/OH
+40,Oklahoma/OK
+41,Oregon/OR
+42,Pennsylvania/PA
+44,RhodeIsland/RI
+45,SouthCarolina/SC
+46,SouthDakota/SD
+47,Tennessee/TN
+48,Texas/TX
+49,Utah/UT
+50,Vermont/VT
+51,Virginia/VA
+53,Washington/WA
+54,WestVirginia/WV
+55,Wisconsin/WI
+56,Wyoming/WY
+72,PuertoRico/PR"
+
+statecodes <- fread(stateCode)
+
+data_for_analysis_without_removing_na <- left_join(data_for_analysis_without_removing_na,statecodes,by="ST")
+
+# Remove NA data
+data_for_analysis <- na.omit(data_for_analysis_without_removing_na)
+data_for_analysis <- left_join(data_for_analysis,statecodes,by="ST")
+
+# Adjusting Income with ADJINC year wise
+data_for_analysis$Income_with_ADJINC <- as.integer(as.numeric(data_for_analysis$ADJINC) * as.numeric(data_for_analysis$PINCP) /1000000) 
+
+data_for_analysis_without_removing_na$Income_with_ADJINC <- as.integer(as.numeric(data_for_analysis_without_removing_na$ADJINC) * as.numeric(data_for_analysis_without_removing_na$PINCP) /1000000) 
+
+#Save data as RDS format  
+saveRDS(data_for_analysis,"data_for_analysis.rds")
+saveRDS(data_for_analysis_without_removing_na,"data_for_analysis_without_removing_na.rds")
+
+```
+
+<p style="color:#025C97">Read RDS to load data. </p>
+
+```{r warning=FALSE,message=FALSE}
+
+library(DT)
+
+data_for_analysis <- readRDS("data_for_analysis.rds")
+data_for_analysis_without_removing_na <- readRDS("data_for_analysis_without_removing_na.rds")
+
+
+#data_for_analysis <- do.call("cbind",data_for_analysis)
+
+#data_for_analysis <- as.data.frame(data_for_analysis)
+
+data_for_analysis$DDRS <- as.numeric(data_for_analysis$DDRS)
+data_for_analysis$DEAR <- as.numeric(data_for_analysis$DEAR)
+data_for_analysis$DEYE <- as.numeric(data_for_analysis$DEYE)
+data_for_analysis$DOUT <- as.numeric(data_for_analysis$DOUT)
+data_for_analysis$PWGTP <- as.numeric(data_for_analysis$PWGTP)
+
+#DT::datatable(head(data_for_analysis,50))
+#head(data_for_analysis,10)
+# 
+# data_for_analysis$DDRS = factor(data_for_analysis$DDRS)
+# data_for_analysis$DEAR = factor(data_for_analysis$DEAR)
+# data_for_analysis$DEYE = factor(data_for_analysis$DEYE)
+# data_for_analysis$DOUT = factor(data_for_analysis$DOUT)
+
+```
+
+## **Analysis of Region wide difficulty problems registered by people in U.S** {.tabset .tabset-fade .tabset-pills}
+
+<p style="color:#025C97"> This section of project focusses on analyzing registered people facing difficulties across different states and regions in U.S. Analyzing the difficulties faced by people would help U.S government to provide specific services and improve their services to people. </p>
+
+Note: This section uses .tabset feature in order to create different Tabs for every Region in U.S
+
+### **Northeast Region -1**
+
+```{r results='hide',warning=FALSE,error=FALSE}
+
+# Find the total population per region 
+
+region_northeast <- data_for_analysis %>%
+  filter(REGION==1) %>%
+  group_by(State) %>%
+  summarise(total_pop = sum(PWGTP),
+            Selfcare_difficulty = sum(PWGTP[DDRS==1]),
+            Hearing_difficulty = sum(PWGTP[DEAR==1]),
+            Vision_difficulty = sum(PWGTP[DEYE==1]),
+            Independent_living = sum(PWGTP[DOUT==1])
+            )
+
+region_northeast <- gather(region_northeast,Difficulty_type, Total, Selfcare_difficulty:Independent_living)
+region_northeast$State <- factor(region_northeast$State)
+region_northeast$Difficulty_type <- factor(region_northeast$Difficulty_type)
+
+library(viridis)
+ggplot(region_northeast, aes(State,Total,fill=Difficulty_type,label=Total))+geom_col(stat = "identity",position = position_dodge(0.6)) +coord_flip() + scale_fill_viridis(discrete=TRUE,option = "D") + labs (
+  title = "Difficulties registered by people in diffrent state",
+  y= "Total count of people",
+  x="States in Northeast Region"
+)
+
+```
+
+
+### **Midwest -2**
+
+```{r}
+
+# Find the total population per region 
+
+region_midwest <- data_for_analysis %>%
+  filter(REGION==2) %>%
+  group_by(State) %>%
+  summarise(total_pop = sum(PWGTP),
+            Selfcare_difficulty = sum(PWGTP[DDRS==1]),
+            Hearing_difficulty = sum(PWGTP[DEAR==1]),
+            Vision_difficulty = sum(PWGTP[DEYE==1]),
+            Independent_living = sum(PWGTP[DOUT==1])
+            )
+
+region_midwest <- gather(region_midwest,Difficulty_type, Total, Selfcare_difficulty:Independent_living)
+region_midwest$State <- factor(region_midwest$State)
+region_midwest$Difficulty_type <- factor(region_midwest$Difficulty_type)
+
+ggplot(region_midwest, aes(State,Total,fill=Difficulty_type,label=Total))+geom_bar(stat = "identity",position =position_dodge(0.6)) +coord_flip() + scale_fill_viridis(discrete=TRUE,option = "D") + labs (
+  title = "Difficulties registered by people in diffrent state",
+  y= "Total count of people",
+  x="States in Midwest Region"
+)
+
+```
+
+
+### **South -3**
+
+```{r}
+
+
+# Find the total population per region 
+
+region_south <- data_for_analysis %>%
+  filter(REGION==3) %>%
+  group_by(State) %>%
+  summarise(total_pop = sum(PWGTP),
+            Selfcare_difficulty = sum(PWGTP[DDRS==1]),
+            Hearing_difficulty = sum(PWGTP[DEAR==1]),
+            Vision_difficulty = sum(PWGTP[DEYE==1]),
+            Independent_living = sum(PWGTP[DOUT==1])
+            )
+
+region_south <- gather(region_south,Difficulty_type, Total, Selfcare_difficulty:Independent_living)
+region_south$State <- factor(region_south$State)
+region_south$Difficulty_type <- factor(region_south$Difficulty_type)
+
+ggplot(region_south, aes(State,Total/1e3,fill=Difficulty_type,label=Total))+geom_bar(stat = "identity",position =position_dodge(0.6)) +coord_flip() + scale_fill_viridis(discrete=TRUE,option = "D") + labs (
+  title = "Difficulties registered by people in diffrent state",
+  y= "Total count of people IN Hundred's",
+  x="States in South Region "
+)
+
+
+```
+
+### **West -4**
+```{r}
+
+# Find the total population per region 
+
+region_west <- data_for_analysis %>%
+  filter(REGION==4) %>%
+  group_by(State) %>%
+  summarise(total_pop = sum(PWGTP),
+            Selfcare_difficulty = sum(PWGTP[DDRS==1]),
+            Hearing_difficulty = sum(PWGTP[DEAR==1]),
+            Vision_difficulty = sum(PWGTP[DEYE==1]),
+            Independent_living = sum(PWGTP[DOUT==1])
+            )
+
+region_west <- gather(region_west,Difficulty_type, Total, Selfcare_difficulty:Independent_living)
+region_west$State <- factor(region_west$State)
+region_west$Difficulty_type <- factor(region_west$Difficulty_type)
+
+ggplot(region_west, aes(State,Total/1e3,fill=Difficulty_type,label=Total/1e3))+geom_bar(stat = "identity",position = position_dodge(0.6)) +coord_flip() + scale_fill_viridis(discrete=TRUE,option = "D") + labs (
+  title = "Difficulties registered by people in diffrent state",
+  y= "Total count of people IN Hundred's",
+  x="States in West Region"
+)
+
+
+```
+
+<b>Interpretation and Summary of above Analysis: </b>
+<ul>
+  <li>It can be easily seen that "Hearing_Difficulity" is the most common difficulty accross all states in U.s </li>
+  <li>California has the highest no of people having hearing problems. Note: This also might be because of higher population in Califoria than some other States. </li>
+  <li> South and West Regions(only California) have more no of people having difficulties than Midwest and Northeast Region.</li>
+  <li>Very few registered people had "Self_living difficulty" in comparision with other difficulties type. </li>
+</ul>  
+
+## **Average income for different class of workers from 2013-17**
+
+<p style="color:#025C97">This section focusses on on how average income for different class of workers changed from 2013 to 2017. I asssumed that there would be change in income from 2013 to 2017. </p>
+
+Note: As there was no column in dataset which would tell the year of that record, Hence, I used ADJINC variable which is an adjustment variable for diffrent years. 
+
+```{r}
+
+# Using ADJINC to create a new column "year"
+data_for_analysis <- data_for_analysis %>%
+  mutate( year = case_when(
+    ADJINC==1061971 ~ "2013",
+    ADJINC==1045195 ~ "2014",
+    ADJINC==1035988 ~ "2015",
+    ADJINC==1029257 ~ "2016",
+    ADJINC==1011189 ~ "2017"
+    )) 
+
+#FIltering out negative and very low income.
+data_for_analysis <- data_for_analysis %>%
+  filter(Income_with_ADJINC>5000)
+
+yearly_avg_income_by_cow <- data_for_analysis %>%
+  group_by(year,COW) %>%
+  summarise(mean_income = mean(Income_with_ADJINC)) %>%
+  arrange(year)
+
+yearly_avg_income_by_cow <- yearly_avg_income_by_cow %>%
+  mutate( COW_Desc = case_when(
+    COW==1 ~ "Employee of a private for-profit company or business",
+    COW==2 ~ "Employee of a private not-for-profit, tax-exempt, or
+.charitable organization",
+    COW==3 ~ "Local government employee",
+    COW==4 ~ "State government employee",
+    COW==5 ~ "Federal government employee",
+    COW==6 ~ "Self-employed in own not incorporated business",
+    COW==7 ~ "Self-employed in own incorporated business",
+    COW==8 ~ "Working without pay in family business or farm",
+    COW==9 ~ "Unemployed and last worked 5 years ago"
+    
+    )) 
+
+library(ggplot2)
+
+ggplot(yearly_avg_income_by_cow, aes(x=year, y=mean_income, fill=year))+geom_bar(stat = "identity")+ facet_wrap(~factor(COW))+ theme(
+   strip.background = element_rect(
+     color="white", fill="#A7C8E9", size=1.5, linetype="solid"
+     ))+ scale_fill_viridis(discrete=TRUE,option = "D")+ labs(
+       x="Year",
+       y="Average Income"
+     )+theme_bw()
+
+
+
+```
+
+From the above graph for different class of worker,we can conclude following things. 
+<ul>
+<li>There is not much diffrence in salaries reported for all different class of workers from 2013 to 2017 </li>
+<li>Class of Worker - 7 which is "Self-employed in own incorporated business" earned the most among all other COW's.</li>
+<li>COW-8 and COW-9 earned the lowest which are "Working withot pay in family business" and "Unemployed or did not work from past 5 years" </li>
+</ul>
+ 
+
+## **Income analysis of Self-employed in own incorporated business per State**
+
+```{r message=FALSE,error=FALSE}
+
+
+Cow_7_Income_by_state <- data_for_analysis %>%
+  filter(COW==7) %>%
+  group_by(State) %>%
+  summarise(
+    mean_inc = mean(Income_with_ADJINC)
+  )
+            
+
+ggplot(Cow_7_Income_by_state, aes(x=fct_reorder(State,mean_inc), y=mean_inc)) + 
+  geom_point(size=3) + 
+  geom_segment(aes(x=State, 
+                   xend=State, 
+                   y=0, 
+                   yend=mean_inc),size=1, color="#DC7633") +
+  labs(title="Self-employed in own incorporated business", 
+       subtitle="Income Analysis per State",
+       x="States",
+       y="Average Inome"
+       ) + 
+  theme_bw()+
+  theme(axis.text.x = element_text(angle=90, vjust=1.0,color="#34495E"),
+                                   axis.text.y  = element_text(color="#34495E"))
+
+```
+
+### **Sum of people having income greater than mean income per state.**
+
+
+```{r}
+Cow_7_people_greater_than_mean_income <- data_for_analysis %>%
+  filter(COW==7) %>%
+  group_by(State) %>%
+  summarise(
+    mean_income <-mean(Income_with_ADJINC),
+    count_people = sum(PWGTP[Income_with_ADJINC>mean_income])
+  ) %>%
+  arrange(desc(count_people))
+
+
+ggplot(Cow_7_people_greater_than_mean_income, aes(x=fct_reorder(State,count_people/1e2,.desc=TRUE), y=count_people/1e2)) + 
+  geom_point(size=3) + 
+  geom_segment(aes(x=State, 
+                   xend=State, 
+                   y=0, 
+                   yend=count_people/1e2),size=1, color="darkgreen") +
+  labs(title="Total count of people having income greater than mean income per state.", 
+       
+       y="Total count of people (1e2)",
+        x= "States"
+       ) + 
+  theme_bw()+
+  theme(axis.text.x = element_text(angle=90, vjust=1.0,color="darkslategrey"),
+                                   axis.text.y  = element_text(color="darkslategrey"))
+
+```
+
+<b>"California" has the most number of people whose income is greater than average income of people in United States. </b>
+
+## **How does Income vary with AGE?**
+
+With this analysis and graph, we can see that Income increases continously as the Age increases - till 55. After Age=55 it tends to decrease again. 
+
+```{r}
+
+#ONly considered people with AGE>20.
+
+cow7_age_distribuition <- data_for_analysis %>%
+  filter(AGEP>20) %>%
+  group_by(AGEP) %>%
+  summarize(avg_income_by_age= mean(Income_with_ADJINC)) %>%
+  select(AGEP,avg_income_by_age) %>%
+  arrange(AGEP)
+
+ ggplot(cow7_age_distribuition, aes(x=AGEP, y=avg_income_by_age)) +
+    geom_line( color="grey") +
+    geom_point(shape=21, color="black", fill="#69b3a2", size=2)+ theme_bw()+ labs(
+      x="Age",
+      y="Mean Income"
+    )
+
+```
+
+## **Analysis of Engineering Fields Income affected by level of education.**
+
+<p style="color:#025C97"> As, I am highly interested in engineering field, This section of the project focusses on analysing Income variation for different fields of engineering with different level of education. Eg. Bachelor's, Master's, Doctorate and Professional Degree After Bachelors.</p>
+
+Note: In this analysis, I have compared Incomes in this manner. 
+<ul>
+<li>Master's to Bachelor's - Percentage of Income increased or decreased for a specific field when Master's is done.</li>
+<li> Professional Degree to Master's - Percentage of Income increased or decreased </li>
+<li> Doctorate to Professional Degree - Percentage of Income increased or decreased </li>
+</ul>
+
+```{r}
+
+#Filtering only engineering Fields
+engineering_income <- data_for_analysis %>%
+  filter(FOD1P==2401 | FOD1P==2402 | FOD1P==2403| FOD1P==2404| FOD1P==2405| FOD1P==2406|  FOD1P==2407| FOD1P==2408| FOD1P==2410 | FOD1P==2418 , Income_with_ADJINC>10000) %>%
+  group_by(SCHL,FOD1P) %>%
+  summarise( mean_inc = mean(Income_with_ADJINC))
+   
+
+engineering_income$FOD1P <- factor(engineering_income$FOD1P)
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2401] <- "Aerospace"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2402] <- "Biological"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2403] <- "Architectural"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2404] <- "Biomedical"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2405] <- "Chemical"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2406] <- "Civil"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2407] <- "Computer"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2408] <- "Electical"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2410] <- "Environmental"
+levels(engineering_income$FOD1P)[levels(engineering_income$FOD1P)==2418] <- "Nuclear Eng."
+
+engineering_income <- engineering_income %>%
+  spread(SCHL,mean_inc)
+
+names(engineering_income)[1] <-"Engineering Branch"
+names(engineering_income)[3] <-"Masters"
+names(engineering_income)[2] <-"Bachelors"
+names(engineering_income)[4] <- "ProfessionalDegree"
+names(engineering_income)[5] <- "Doctorate"
+
+
+display_data <- engineering_income
+display_data$Bachelors <- as.integer(display_data$Bachelors)
+display_data$Masters <- as.integer(display_data$Masters)
+display_data$ProfessionalDegree <- as.integer(display_data$ProfessionalDegree)
+display_data$Doctorate <- as.integer(display_data$Doctorate)
+
+
+display_data$Masters= display_data$Masters/display_data$Bachelors
+display_data$ProfessionalDegree= display_data$ProfessionalDegree/display_data$Bachelors
+display_data$Doctorate= display_data$Doctorate/display_data$Bachelors
+
+
+improvement_formatter <- formatter("span", style = x ~ style(font.weight = "bold", 
+                                                     color = ifelse(x > 0, customGreen, ifelse(x < 0, customRed, "black"))), 
+                                   x ~ icontext(ifelse(x == max(x), "thumbs-up", ""), x)
+)
+
+
+formattable(display_data, 
+             list(
+                 
+              `Engineering Branch` = formatter("span", 
+                        style = ~ style(color = "blue",font.weight = "bold"),
+                        x~icontext(ifelse(x=="Architectural" | x=="Computer","star",""),x)),
+              `Masters`= formatter("span", style = ~ style(color = ifelse(`Masters` <`Bachelors`, "green", "red")),~ icontext(ifelse(`Masters` <`Bachelors`,"arrow-up", "arrow-down"), `Masters`)),
+               ProfessionalDegree= formatter("span", style = ~ style(color = ifelse(ProfessionalDegree > `Masters`, "green", "red")),~ icontext(ifelse(ProfessionalDegree >`Masters`,"arrow-up", "arrow-down"), ProfessionalDegree)),
+              `Doctorate`= formatter("span", style = ~ style(color = ifelse(`Doctorate` >ProfessionalDegree, "darkgreen", "red")),~ icontext(ifelse(`Doctorate` > ProfessionalDegree,"arrow-up", "arrow-down"), `Doctorate`)) 
+              ))
+
+
+```
+
+Summary or Interpretation of the above tabular summary:
+<ul>
+
+<li>Only two field of engineering had advantage of doing Phd 1. Architectural 2. Computer.(Indicated by STAR in table) We can see this from an upward arrow which shows there has been an increase in Income percentage from doing Professional Degree.</li>
+
+<li>According to survey data, we can say that pursuing Master's and Professional Degree in any field of engineering is always helpful in terms of Income.</li>
+
+</ul>
+
+
+## **Ansari test for comparing Mens and Womens Income in Computer Engineering.**
+
+<p style="color:#025C97">Now, this section check whether Men and women in Computer Engineering earns the same or not. (Means of two group) </p>
+As, the data is not uniform, T-test can not be used. Hence, I have used Ansari test.  
+
+```{r}
+
+men_vs_women_income <- data_for_analysis %>%
+  filter(FOD1P==2407)%>%
+  group_by(SEX) %>%
+  select(Income_with_ADJINC,SEX)
+
+men_computer_eng_income <- data_for_analysis %>%
+  filter(FOD1P==2407,SEX==1) %>%
+  select(Income_with_ADJINC)
+
+women_computer_eng_income <- data_for_analysis %>%
+  filter(FOD1P==2407,SEX==2) %>%
+  select(Income_with_ADJINC)
+
+men_architecture_eng_income <- data_for_analysis %>%
+  filter(FOD1P==2403,SEX==1) %>%
+  select(Income_with_ADJINC)
+
+women_architecture_eng_income <- data_for_analysis %>%
+  filter(FOD1P==2403,SEX==2) %>%
+  select(Income_with_ADJINC)
+
+# Ansari test is used to test the NULL hypothesis that the two population distribuition functions corresponding to the two samples are identical against the alternative hypothesis that they differ by dispersion. 
+
+ansari.test(men_computer_eng_income$Income_with_ADJINC,women_computer_eng_income$Income_with_ADJINC)  
+  
+# P- Value = 1.94e-13 < 0.05 (Significance level). And hence we should reject NULL hypothesis and conclude that there is significant amount of diffrence in Mens_Income and Women's Income who had done Computer Engineering.
+
+# Now lets check the architecture enginerring.
+ansari.test(men_architecture_eng_income$Income_with_ADJINC,women_architecture_eng_income$Income_with_ADJINC)
+
+# P-value = 0.8081 > 0.05 . Hence we failed to reject NULL hypothesis and can conclude that Men and women who had done Architectural Engineering earns same. 
+
+```
+
+Summary and Interpretation of Ansari test:
+For Computer Engineering:
+<ul>
+  <li>P- Value = 1.94e-13 < 0.05 (Significance level). And hence we should reject NULL hypothesis and conclude that there is significant amount of diffrence in Mens_Income and Women's Income who had done Computer Engineering.</li>
+</ul>
+
+For Architect Engineering:
+<ul>
+  <li>P-value = 0.8081 > 0.05 . Hence we failed to reject NULL hypothesis and can conclude that Men and women who had done Architectural Engineering earns same. 
+</li>
+</ul>
+
+Now, to prove this above statistical test, we can actual compare statistics for men and women income who had done Computer Engineering. 
+
+```{r}
+
+summary(men_computer_eng_income$Income_with_ADJINC)
+summary(women_computer_eng_income$Income_with_ADJINC)
+
+```
+
+After comparing actual summary, we can see say that Men earn's more than women. Max income for men is 1393418 whereas Maximum women's income was 562314. But that is not true when comparing for Architectural Engineering according to Ansari test.
+
+## **Year wise - Most popular field of engineering. **
+
+<p style="color:#025C97">This section focusses on finding the most popular field of engineering i.e Number of people in particular field per year. Note: 2014 year data is compared with 2013 (Total count of people), 2015 with 2014, 2016 with 2015 and similarly 2017 with 2016.   
+
+```{r}
+library(dplyr)
+popular_field_by_year <- data_for_analysis %>%
+  dplyr::filter(FOD1P==2401 | FOD1P==2402 | FOD1P==2403| FOD1P==2404| FOD1P==2405| FOD1P==2406|  FOD1P==2407| FOD1P==2408| FOD1P==2410 | FOD1P==2418) %>%
+  dplyr::group_by(FOD1P,year) %>%
+  dplyr::summarise(total = sum(PWGTP)) 
+
+year_2013 <- popular_field_by_year %>%
+  dplyr::filter(year==2013)
+
+popular_field_by_year$FOD1P <- factor(popular_field_by_year$FOD1P)
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2401] <- "Aerospace"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2402] <- "Biological"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2403] <- "Architectural"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2404] <- "Biomedical"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2405] <- "Chemical"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2406] <- "Civil"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2407] <- "Computer"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2408] <- "Electrical"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2410] <- "Environmental"
+levels(popular_field_by_year$FOD1P)[levels(popular_field_by_year$FOD1P)==2418] <- "Nuclear Eng."
+
+
+spreaded_data <- popular_field_by_year %>%
+  spread(year,total)
+
+#NUmber's in table shows people count.
+#Upward Arrow with green color indicates that total count of people has been increased from previous year. On the other hand, Downward arrow with red color indicates that total count of people has decreased from the previous year.
+formattable(spreaded_data,list( 
+  `FOD1P` = formatter("span", 
+                        style = ~ style(color = "blue",font.weight = "bold"),
+                        x~icontext(ifelse(x=="Electrical" ,"star",""),x)),
+   `2014`= formatter("span", style = ~ style(color = ifelse(`2014` > `2013`, "green", "red")),~ icontext(ifelse(`2014` >`2013`,"arrow-up", "arrow-down"), `2014`)),
+  `2015`= formatter("span", style = ~ style(color = ifelse(`2015` > `2014`, "green", "red")),~ icontext(ifelse(`2015` >`2014`,"arrow-up", "arrow-down"), `2015`)),
+  `2016`= formatter("span", style = ~ style(color = ifelse(`2016` > `2015`, "green", "red")),~ icontext(ifelse(`2016` >`2015`,"arrow-up", "arrow-down"), `2016`)),
+  `2017`= formatter("span", style = ~ style(color = ifelse(`2017` > `2016`, "green", "red")),~ icontext(ifelse(`2017` >`2016`,"arrow-up", "arrow-down"), `2017`))
+
+                        ))
+
+ggplot(popular_field_by_year, aes(fill=FOD1P, y=total, x=factor(year))) + 
+    geom_bar(position="stack", stat="identity") +
+    scale_fill_viridis(discrete = T) +
+    ggtitle("Studying the most popular field from year 2013-17")+theme_bw()+labs(
+      x="Year",
+      y="Total Number of people"
+    )
+
+```
+
+Upward Arrow with green color indicates that total count of people has been increased from previous year. On the other hand, Downward arrow with red color indicates that total count of people has decreased from the previous year.
+
+Summary and Interpretation for above tabular data:
+<ul>
+  <li>From 2013 to 2017, no of people in "Aerospace","Civil","Computer" and "Electrical" has continously increased.</li>
+  <li>"Electrical Engineering" was the most popular field according to the survey data</li>
+  <li>Nuclear Eng. was the least popular amongs all other engineering field<li>
+</ul>
+
+
+## **Income Group Prediction Using Support Vector Machines**
+
+This section of the project focusses on predictiing Income group of person in total 5 "Categories". 
+<ul>
+  
+  <li>Very Low - Income (Income less than 20000)</li>
+  <li>Low - Income ( Income >=20000 & Income <30000)</li>
+  <li>Average (Income >320000 & Income <70000) </li>
+  <li>High (Income >=90000 & Income <70000)) </li>
+  <li>Very High (Income >=90000) </li>
+  
+</ul>
+
+Rather than using Regression algorithms which would use continous variable "Income_with_ADJINC" as a target variable, I have opted to use Classification algorithm -SVM to predict income groups, because SVM works better than other algorithms when data is larger and has many input features. As,each data item is plotted as a point in n-dimensional space (where n is number of features), with the value of each feature being the value of a particular coordinate. Then, classification is performed by finding the hyper-plane that best differentiates the classes. In addition to that, model's performance can also be improved using Kernel trick in SVM. This model uses "Linear kernel", but using kernels like "rbf" can improve the accuracy.
+
+After trying Multi Linear and Polynomial Regression, the model had very low accuracy and hence I tried to classify Income rather than predict the actual continous Income. 
+
+Note: As, this is a very large dataset, I have used <p style="color:"red">M5.2XLarge ec2-instance from AWS </p> to train model.  
+
+### **Data Preprocessing- Making data ready to train SVM model!**
+
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+#Removing Income with less than 0. 
+
+data_without_negtive_Income <- data_for_analysis %>%
+  filter(Income_with_ADJINC>0)
+
+summary(data_without_negtive_Income$Income_with_ADJINC)
+
+#Making new column "Income_Group"
+data_with_income_groups <- data_without_negtive_Income %>%
+  dplyr::mutate(Income_Group = case_when(
+    Income_with_ADJINC<20000 ~"Very Low",
+    Income_with_ADJINC>=20000 & Income_with_ADJINC<30000 ~"Low",
+    Income_with_ADJINC>=30000 & Income_with_ADJINC<70000   ~"Average",
+    Income_with_ADJINC>=70000 & Income_with_ADJINC<90000 ~"Above Average",
+    Income_with_ADJINC>=90000 ~"High"
+    
+  ))
+
+
+levels(data_with_income_groups$SCHL)[levels(data_with_income_groups$SCHL)=="Bachelors"] <- 21
+levels(data_with_income_groups$SCHL)[levels(data_with_income_groups$SCHL)=="Master's"] <- 22 
+levels(data_with_income_groups$SCHL)[levels(data_with_income_groups$SCHL)=="Professional Degree after Bachelor's"] <- 23
+levels(data_with_income_groups$SCHL)[levels(data_with_income_groups$SCHL)=="Doctorate"] <- 24
+
+data_with_income_groups$Income_Group <- factor(data_with_income_groups$Income_Group)
+levels(data_with_income_groups$Income_Group)[levels(data_with_income_groups$Income_Group)=="Very Low"] <- 1
+levels(data_with_income_groups$Income_Group)[levels(data_with_income_groups$Income_Group)=="Low"] <- 2
+levels(data_with_income_groups$Income_Group)[levels(data_with_income_groups$Income_Group)=="Average"] <- 3
+levels(data_with_income_groups$Income_Group)[levels(data_with_income_groups$Income_Group)=="Above Average"] <- 4
+levels(data_with_income_groups$Income_Group)[levels(data_with_income_groups$Income_Group)=="High"] <- 5
+
+
+```
+
+
+### **Splitting up Training and Tesing datasets using createDataPartition**
+
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+library(caret)
+set.seed(3456)
+# 75% => Training Dataset and 25% => Testing Dataset
+trainIndex <- createDataPartition(data_with_income_groups$Income_Group, p = .75, 
+                                  list = FALSE, 
+                                  times = 1)
+
+train_dataset <- data_with_income_groups[trainIndex,]
+test_dataset <- data_with_income_groups[-trainIndex,]
+
+```
+
+
+ 
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+library(caTools)
+library(e1071)
+
+train_dataset <-  train_dataset %>%
+  dplyr::filter(year==2017) %>%
+  dplyr::select(ST,CIT,COW,AGEP,SEX,FOD1P,SCHL,RAC1P,Income_Group)
+
+test_dataset <-  test_dataset %>%
+  dplyr::filter(year==2017) %>%
+  dplyr::select(ST,CIT,COW,AGEP,SEX,FOD1P,SCHL,RAC1P,Income_Group)
+
+
+test_dataset$ST <-factor(test_dataset$ST)
+test_dataset$CIT <-factor(test_dataset$CIT)
+test_dataset$COW <-factor(test_dataset$COW)
+test_dataset$SEX <-factor(test_dataset$SEX)
+test_dataset$FOD1P <-factor(test_dataset$FOD1P)
+test_dataset$SCHL <-factor(test_dataset$SCHL)
+test_dataset$RAC1P <-factor(test_dataset$RAC1P)
+test_dataset$Income_Group <-factor(test_dataset$Income_Group)
+
+train_dataset$ST <-factor(train_dataset$ST)
+train_dataset$CIT <-factor(train_dataset$CIT)
+train_dataset$COW <-factor(train_dataset$COW)
+train_dataset$SEX <-factor(train_dataset$SEX)
+train_dataset$FOD1P <-factor(train_dataset$FOD1P)
+train_dataset$SCHL <-factor(train_dataset$SCHL)
+train_dataset$RAC1P <-factor(train_dataset$RAC1P)
+train_dataset$Income_Group <-factor(train_dataset$Income_Group)
+
+saveRDS(train_dataset,"train_dataset.rds")
+saveRDS(test_dataset,"test_dataset.rds")
+
+```
+
+### **Training Classifier**
+
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+set.seed(123)
+classifier = svm(formula = Income_Group ~ .,
+data = train_dataset,
+type = 'C-classification',
+gamma = 100
+)
+saveRDS(classifier,"classifier.rds")
+
+```
+
+
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+classifier <- readRDS("classifier.rds")
+sample_n(test_dataset, n=10000)
+y_train_pred <- predict(classifier, newdata=train_dataset[-9])
+y_test_pred = predict(classifier, newdata=test_dataset[-9])
+
+```
+
+<b>Test Dataset- Performance</b>
+
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+test_dataset <- readRDS("test_dataset.rds")
+y_test_pred <- readRDS("y_test_pred.rds")
+svm_y_test_sample_cm <- confusionMatrix(y_test_pred,test_dataset$Income_Group)
+saveRDS(svm_y_test_sample_cm,"svm_y_test_sample_cm.rds")
+
+```
+
+```{r }
+
+svm_y_test_sample_cm <-readRDS("svm_y_test_sample_cm.rds")
+svm_y_test_sample_cm
+
+```
+
+<b>Sample Training Dataset - Performance</b>
+
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+classifier<- readRDS("classifier.rds")
+train_dataset <- readRDS("train_dataset.rds")
+sample_train <- sample_n(train_dataset,25000)
+y_sample_train_pred <- predict(classifier,sample_train[-9])
+svm_y_train_sample_cm <- confusionMatrix(y_sample_train_pred,sample_train$Income_Group)
+saveRDS(svm_y_train_sample_cm,"svm_y_train_sample_cm.rds")
+
+```
+
+```{r}
+
+svm_y_train_sample_cm <-readRDS("svm_y_train_sample_cm.rds")
+svm_y_train_sample_cm
+
+```
+
+### **Intrepretation of SVM-Model on Testing and Training Dataset**
+
+<ul>
+
+  <li>Using confusion matrix, we can see that SVM model had almost same accuracy(48%) for sample Training and Test dataset. But it might differ for whole training dataset. Although, this is not a great model, It can be improved using hyper-parameter optimization techniques like GridSearchCV, changinh kernel type,etc. </li>
+  <li> Using "Statistics by Class", we have several parameters which tells how different categories/levels are predicted. For example, "Balanced Accuracy", Class: High had the highest and balanced actual TRUE predictions. </li>
+  <li> One important thing to note is that, this model performed worst in predicting classes "Above Average" and "Low". But did well in predicting classes like "Average" and "High" </li>
+  <li> Although this model cannot be used in real-life, but can be used for people with Average and High Income. </li>
+  
+</ul>
+
+## **Income_Group prediction using Artificial Neural Network**
+
+In order to built better classification model, I also tried using ANN-Artificial Neural Network. 
+
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+ann_classification_model_income <- train(Income_Group ~ .,
+                                         data = train_dataset,
+                                         method = "nnet",
+                                         maxit=50
+                                         )
+save(ann_classification_model_income)
+
+train_pred_ann <- predict(ann_classification_model_income,train_dataset[-9])
+test_prediction_ann <- predict(ann_classification_model_income,test_dataset[-9])
+
+```
+
+
+### **Evaluating Confusion matrix on Testing dataset using trained ANN.**
+
+```{r}
+test_dataset <- readRDS("test_dataset.rds")
+
+train_pred_ann <- readRDS("train_pred_ann.rds")
+test_prediction_ann <- readRDS("test_prediction_ann.rds")
+
+y_test_cm_ann <- confusionMatrix(test_prediction_ann,test_dataset$Income_Group)
+y_test_cm_ann
+
+```
+
+
+<p style="color:"red"">Accuracy =46% which is even lesser than previous SVM classification model. </p>
+This is not the results I was expected, Using confusion matrix, we can see that ANN is not able to accurately classify classes like "Above Average", "Low" and "Very Low". Maybe because of lesser no of people having that Income_Group. 
+So, I think, the model is underfitted for some levels or classes like "very low" and "above average", even though training time was approximately: 13 hours. 
+
+  
+## **What features influenced people purchasing Insurance from a private company ? - Using ANN**
+
+<p style="color:#025C97"> This section aims to analyze which input features affects the most for buying an insurance from a private company(H1NS2) and predict whether a person is going to buy an insurance from a private company. I thought this can be usefull for an insurance company to target specific people which are likely to purchase an insurance.  </p>
+
+Target Variable: HINS2
+Input features: AGEP, COW - Class of Worker , PINCP -income , ST , JWTR - Means Of Transportation , CIT
+  
+```{r eval=FALSE, error=FALSE, message=FALSE}
+
+cols <- c("AGEP","COW","PINCP","ST","JWTR","CIT","HINS1","HINS2")
+
+df <-   fread("/home/ayush/Downloads/csv_pus/psam_pusa.csv",select=cols)
+df_b <- fread("/home/ayush/Downloads/csv_pus/psam_pusb.csv",select=cols)
+df_c <- fread("/home/ayush/Downloads/csv_pus/psam_pusc.csv",select=cols)
+df_d <- fread("/home/ayush/Downloads/csv_pus/psam_pusd.csv",select=cols)
+
+data_merged <- rbind(df,df_b,df_c,df_d)
+insurance_classification <- tbl_df(data_merged) 
+insurance_classification <- na.omit(insurance_classification)
+
+rm(df,df_b,df_c,df_d)
+
+insurance_classification <- insurance_classification %>%
+  filter(ST=="6", AGEP>19)
+
+insurance_classification$HINS1 <- factor(insurance_classification$HINS1)
+insurance_classification$HINS2 <- factor(insurance_classification$HINS2)
+insurance_classification$COW <- factor(insurance_classification$COW)
+insurance_classification$CIT <- factor(insurance_classification$CIT)
+
+install.packages('e1071', dependencies=TRUE)
+
+set.seed(1414)
+insurance_model <- train(HINS2 ~ .,
+                   data = insurance_classification,
+                   method = "nnet")
+
+insurance_classification<- within(insurance_classification, rm(ST))
+saveRDS(insurance_model,"insurancemodel.rds")
+
+```
+
+### **Graphical Representation of trained ANN**
+
+```{r }
+
+insurance_model <- readRDS("insurancemodel.rds")
+plotnet(insurance_model$finalModel,circle_cex=3,cex_val=0.5,y_names = "HINS2",max_sp=TRUE)
+title("Graphical representation of trained ANN")
+
+
+```
+
+
+### **Feature Importance Graph**
+
+```{r}
+
+garson(insurance_model$finalModel)
+# We can also use plot(varImp()) function instead of garson, Garson function just plot importance factor in bar graph form which is easy to understand.
+
+```
+
+From the graph, we can see that <b>"AGE" , "Means of Transportation" and "Income" </b>affects the most according to model. 
+Hence, an insurance company can use these three variables to predict whether the person is going to buy insurance or not. 
+
+
+### **Summary of trained ANN**
+
+Final Accuracy of model was: 87.5 % which is really better than previous trained Machine Learning models. Final size was 5 with 2 classes in target variable. (1. Yes 2. No) 
+
+```{r}
+
+insurance_model
+
+```
+
+
